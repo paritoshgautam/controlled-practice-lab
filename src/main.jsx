@@ -57,18 +57,32 @@ const defaultData = {
 };
 
 const loadData = () => {
+  const fallback = {
+    ...defaultData,
+    users: [...defaultData.users],
+    attempts: [],
+  };
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (parsed?.users?.length) return parsed;
+    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+    if (parsed?.users?.length) {
+      return {
+        users: parsed.users,
+        attempts: Array.isArray(parsed.attempts) ? parsed.attempts : [],
+      };
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+    return fallback;
   } catch {
-    // Fall through to seeded data.
+    return fallback;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultData));
-  return defaultData;
 };
 
 const saveData = (data) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
 };
 
 const formatDuration = (seconds) => {
@@ -105,8 +119,12 @@ const pct = (value) => `${Math.round(value * 100)}%`;
 function App() {
   const [appData, setAppData] = useState(loadData);
   const [authUser, setAuthUser] = useState(() => {
-    const id = sessionStorage.getItem("controlled-practice-user-id");
-    return loadData().users.find((user) => user.id === id) || null;
+    try {
+      const id = window.sessionStorage.getItem("controlled-practice-user-id");
+      return loadData().users.find((user) => user.id === id) || null;
+    } catch {
+      return null;
+    }
   });
   const [view, setView] = useState("tests");
   const [selectedSubjectId, setSelectedSubjectId] = useState("physics");
@@ -269,7 +287,11 @@ function App() {
     if (!user) return false;
     setAuthUser(user);
     setView(user.role === "admin" ? "admin" : "tests");
-    sessionStorage.setItem("controlled-practice-user-id", user.id);
+    try {
+      window.sessionStorage.setItem("controlled-practice-user-id", user.id);
+    } catch {
+      // Session restore is optional.
+    }
     return true;
   };
 
@@ -277,7 +299,11 @@ function App() {
     reset();
     setAuthUser(null);
     setView("tests");
-    sessionStorage.removeItem("controlled-practice-user-id");
+    try {
+      window.sessionStorage.removeItem("controlled-practice-user-id");
+    } catch {
+      // Session restore is optional.
+    }
   };
 
   const createUser = (user) => {
