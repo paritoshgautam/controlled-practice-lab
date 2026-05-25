@@ -14,8 +14,30 @@ import {
   Shield,
   XCircle,
 } from "lucide-react";
-import { tests } from "./mockTests";
+import { tests as physicsTests } from "./mockTests";
+import { mathTests } from "./mathTests";
 import "./styles.css";
+
+const subjects = [
+  {
+    id: "physics",
+    label: "Physics",
+    subtitle: "Ch. 22-23, circuits, Coulomb force",
+    tests: physicsTests.map((test) => ({
+      ...test,
+      subject: "Physics",
+      questionCount: test.questions.length,
+      timeLimitMinutes: 60,
+      description: "Physics review practice covering definitions, Coulomb force, Ohm's law, circuit behavior, energy, power, graphs, and electrical safety.",
+    })),
+  },
+  {
+    id: "math",
+    label: "Math",
+    subtitle: "Math 3 Units 1-8",
+    tests: mathTests,
+  },
+];
 
 const scoreOpen = (answer, keywords) => {
   const normalized = answer.toLowerCase();
@@ -26,6 +48,11 @@ const scoreOpen = (answer, keywords) => {
 const scoreQuestion = (question, answer) => {
   if (question.type === "choice") {
     return Number(answer) === question.answer ? 1 : 0;
+  }
+  if (question.type === "mc_work") {
+    const choiceScore = Number(answer?.choice) === question.answer ? 0.7 : 0;
+    const workScore = scoreOpen(answer?.work || "", question.keywords) * 0.3;
+    return choiceScore + workScore;
   }
   if (question.type === "numeric") {
     const value = Number(answer);
@@ -38,13 +65,16 @@ const scoreQuestion = (question, answer) => {
 const pct = (value) => `${Math.round(value * 100)}%`;
 
 function App() {
+  const [selectedSubjectId, setSelectedSubjectId] = useState("physics");
   const [selectedId, setSelectedId] = useState(1);
   const [started, setStarted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [answers, setAnswers] = useState({});
   const [warnings, setWarnings] = useState([]);
   const [startedAt, setStartedAt] = useState(null);
-  const selectedTest = tests.find((test) => test.id === selectedId);
+  const [now, setNow] = useState(Date.now());
+  const selectedSubject = subjects.find((subject) => subject.id === selectedSubjectId);
+  const selectedTest = selectedSubject.tests.find((test) => test.id === selectedId) || selectedSubject.tests[0];
 
   const results = useMemo(() => {
     const rows = selectedTest.questions.map((question, index) => {
@@ -99,12 +129,28 @@ function App() {
     };
   }, [started, submitted]);
 
+  useEffect(() => {
+    if (!started || submitted) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [started, submitted]);
+
+  useEffect(() => {
+    if (!started || submitted || !startedAt) return;
+    const elapsed = Math.floor((now - startedAt) / 1000);
+    if (elapsed >= (selectedTest.timeLimitMinutes || 60) * 60) {
+      setSubmitted(true);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
+  }, [now, selectedTest.timeLimitMinutes, started, startedAt, submitted]);
+
   const start = async () => {
     setAnswers({});
     setWarnings([]);
     setSubmitted(false);
     setStarted(true);
     setStartedAt(Date.now());
+    setNow(Date.now());
     try {
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
@@ -131,8 +177,14 @@ function App() {
   };
 
   const elapsedMinutes = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 60000)) : 0;
+  const elapsedSeconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+  const remainingSeconds = Math.max(0, (selectedTest.timeLimitMinutes || 60) * 60 - elapsedSeconds);
+  const remainingLabel = `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, "0")}`;
   const answered = selectedTest.questions.filter((question) => {
     const answer = answers[question.id];
+    if (question.type === "mc_work") {
+      return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
+    }
     return answer !== undefined && String(answer).trim() !== "";
   }).length;
 
@@ -142,13 +194,30 @@ function App() {
         <div className="brand">
           <Shield aria-hidden="true" />
           <div>
-            <h1>Physics Mock Test Lab</h1>
-            <p>Ch. 22-23, circuits, Coulomb force</p>
+            <h1>Controlled Practice Lab</h1>
+            <p>{selectedSubject.subtitle}</p>
           </div>
         </div>
 
+        <div className="subject-tabs" aria-label="Subject">
+          {subjects.map((subject) => (
+            <button
+              className={subject.id === selectedSubjectId ? "subject-tab active" : "subject-tab"}
+              key={subject.id}
+              onClick={() => {
+                if (started) return;
+                setSelectedSubjectId(subject.id);
+                setSelectedId(1);
+              }}
+              disabled={started}
+            >
+              {subject.label}
+            </button>
+          ))}
+        </div>
+
         <div className="test-list">
-          {tests.map((test) => (
+          {selectedSubject.tests.map((test) => (
             <button
               className={test.id === selectedId ? "test-button active" : "test-button"}
               key={test.id}
@@ -173,7 +242,8 @@ function App() {
           </div>
           <div className="status-strip">
             <span><Clock size={16} /> {started ? `${elapsedMinutes} min` : "Not started"}</span>
-            <span><Calculator size={16} /> {answered}/20 answered</span>
+            <span><Clock size={16} /> {started ? `${remainingLabel} left` : `${selectedTest.timeLimitMinutes} min limit`}</span>
+            <span><Calculator size={16} /> {answered}/{selectedTest.questions.length} answered</span>
             <span className={warnings.length ? "warning-pill" : ""}><AlertTriangle size={16} /> {warnings.length} warnings</span>
           </div>
         </header>
@@ -184,8 +254,8 @@ function App() {
               <Lock size={34} />
               <h3>Answers stay hidden until submit.</h3>
               <p>
-                Each mock test has 20 questions: multiple choice, calculation, and open-ended reasoning.
-                Open-ended answers are scored by rubric keywords and then shown with a model response.
+                {selectedTest.description} This test has {selectedTest.questions.length} questions and a {selectedTest.timeLimitMinutes}-minute target.
+                Answers and explanations appear only after submission.
               </p>
             </div>
             <div className="rules">
@@ -227,7 +297,7 @@ function App() {
 
               <div className="submit-bar">
                 {!submitted ? (
-                  <button className="primary" type="submit" disabled={answered < 20}>Submit Test</button>
+                  <button className="primary" type="submit" disabled={answered < selectedTest.questions.length}>Submit Test</button>
                 ) : (
                   <button className="secondary" type="button" onClick={reset}><RotateCcw size={18} /> Choose Another Test</button>
                 )}
@@ -239,7 +309,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Assessment</p>
                   <h3>{pct(results.percent)} score</h3>
-                  <p>{results.total.toFixed(1)} of 20 points. Review the explanations below and redo any calculation on paper.</p>
+                  <p>{results.total.toFixed(1)} of {selectedTest.questions.length} points. Review the explanations below and redo any calculation on paper.</p>
                 </div>
                 <div className="meter">
                   <div style={{ width: pct(results.percent) }} />
@@ -254,17 +324,29 @@ function App() {
 }
 
 function Question({ index, question, value, locked, score, onChange }) {
-  const correct = score === 1;
+  const correct = score >= 0.99;
+  const typeLabel = question.type === "open"
+    ? "Open ended"
+    : question.type === "numeric"
+      ? "Calculation"
+      : question.type === "mc_work"
+        ? "MC + work"
+        : "Multiple choice";
+  const workValue = typeof value === "object" && value !== null ? value.work || "" : "";
+  const choiceValue = typeof value === "object" && value !== null ? value.choice : value;
   return (
     <article className={locked ? "question reviewed" : "question"}>
       <div className="question-head">
         <span>Q{index + 1}</span>
-        <strong>{question.type === "open" ? "Open ended" : question.type === "numeric" ? "Calculation" : "Multiple choice"}</strong>
+        <strong>{typeLabel}</strong>
+        {question.topic && <em>{question.topic}</em>}
+        {question.difficulty && <em>{question.difficulty}</em>}
+        {question.estimatedMinutes && <em>{question.estimatedMinutes} min</em>}
         {locked && (correct ? <CheckCircle2 className="ok" /> : <XCircle className="bad" />)}
       </div>
       <p>{question.prompt}</p>
 
-      {question.type === "choice" && (
+      {(question.type === "choice" || question.type === "mc_work") && (
         <div className="options">
           {question.options.map((option, optionIndex) => (
             <label key={option}>
@@ -272,14 +354,23 @@ function Question({ index, question, value, locked, score, onChange }) {
                 type="radio"
                 name={question.id}
                 value={optionIndex}
-                checked={String(value) === String(optionIndex)}
+                checked={String(choiceValue) === String(optionIndex)}
                 disabled={locked}
-                onChange={() => onChange(String(optionIndex))}
+                onChange={() => onChange(question.type === "mc_work" ? { choice: String(optionIndex), work: workValue } : String(optionIndex))}
               />
               <span>{option}</span>
             </label>
           ))}
         </div>
+      )}
+
+      {question.type === "mc_work" && (
+        <textarea
+          value={workValue}
+          disabled={locked}
+          onChange={(event) => onChange({ choice: choiceValue, work: event.target.value })}
+          placeholder="Show your reasoning. Include the formula, rule, or restriction you used."
+        />
       )}
 
       {question.type === "numeric" && (
@@ -301,17 +392,18 @@ function Question({ index, question, value, locked, score, onChange }) {
           value={value}
           disabled={locked}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="Write a complete physics explanation."
+          placeholder="Write a complete explanation."
         />
       )}
 
       {locked && (
         <div className="feedback">
           <strong>{score.toFixed(1)} / 1 point</strong>
-          {question.type === "open" ? (
+          {question.type === "open" || question.type === "mc_work" ? (
             <>
-              <p>{question.rubric}</p>
+              <p>{question.rubric || "Reasoning credit is based on the selected answer plus relevant work."}</p>
               <p><b>Model response:</b> {question.sample}</p>
+              {question.explanation && <p>{question.explanation}</p>}
             </>
           ) : (
             <p>{question.explanation}</p>
