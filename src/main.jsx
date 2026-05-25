@@ -10,8 +10,10 @@ import {
   FileText,
   Lock,
   Maximize,
+  Plus,
   RotateCcw,
   Shield,
+  UserPlus,
   XCircle,
 } from "lucide-react";
 import { tests as physicsTests } from "./mockTests";
@@ -39,6 +41,42 @@ const subjects = [
   },
 ];
 
+const STORAGE_KEY = "controlled-practice-lab-data-v1";
+const defaultData = {
+  users: [
+    {
+      id: "admin-default",
+      name: "Parent Admin",
+      username: "admin",
+      password: "admin123",
+      role: "admin",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  attempts: [],
+};
+
+const loadData = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (parsed?.users?.length) return parsed;
+  } catch {
+    // Fall through to seeded data.
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultData));
+  return defaultData;
+};
+
+const saveData = (data) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+};
+
+const formatDuration = (seconds) => {
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m ${remaining}s`;
+};
+
 const scoreOpen = (answer, keywords) => {
   const normalized = answer.toLowerCase();
   const hits = keywords.filter((word) => normalized.includes(String(word).toLowerCase()));
@@ -65,10 +103,17 @@ const scoreQuestion = (question, answer) => {
 const pct = (value) => `${Math.round(value * 100)}%`;
 
 function App() {
+  const [appData, setAppData] = useState(loadData);
+  const [authUser, setAuthUser] = useState(() => {
+    const id = sessionStorage.getItem("controlled-practice-user-id");
+    return loadData().users.find((user) => user.id === id) || null;
+  });
+  const [view, setView] = useState("tests");
   const [selectedSubjectId, setSelectedSubjectId] = useState("physics");
   const [selectedId, setSelectedId] = useState(1);
   const [started, setStarted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [attemptSaved, setAttemptSaved] = useState(false);
   const [answers, setAnswers] = useState({});
   const [warnings, setWarnings] = useState([]);
   const [startedAt, setStartedAt] = useState(null);
@@ -144,10 +189,38 @@ function App() {
     }
   }, [now, selectedTest.timeLimitMinutes, started, startedAt, submitted]);
 
+  useEffect(() => {
+    if (!submitted || attemptSaved || !authUser || !startedAt) return;
+    const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const attempt = {
+      id: crypto.randomUUID(),
+      userId: authUser.id,
+      userName: authUser.name,
+      username: authUser.username,
+      subject: selectedTest.subject,
+      testId: selectedTest.id,
+      testTitle: selectedTest.title,
+      score: Number(results.total.toFixed(2)),
+      total: selectedTest.questions.length,
+      percent: Math.round(results.percent * 100),
+      answered,
+      warnings: warnings.length,
+      elapsedSeconds: elapsed,
+      submittedAt: new Date().toISOString(),
+    };
+    setAppData((current) => {
+      const next = { ...current, attempts: [attempt, ...current.attempts] };
+      saveData(next);
+      return next;
+    });
+    setAttemptSaved(true);
+  }, [answered, attemptSaved, authUser, results.percent, results.total, selectedTest, startedAt, submitted, warnings.length]);
+
   const start = async () => {
     setAnswers({});
     setWarnings([]);
     setSubmitted(false);
+    setAttemptSaved(false);
     setStarted(true);
     setStartedAt(Date.now());
     setNow(Date.now());
@@ -170,6 +243,7 @@ function App() {
   const reset = () => {
     setStarted(false);
     setSubmitted(false);
+    setAttemptSaved(false);
     setAnswers({});
     setWarnings([]);
     setStartedAt(null);
@@ -188,6 +262,56 @@ function App() {
     return answer !== undefined && String(answer).trim() !== "";
   }).length;
 
+  const login = (username, password) => {
+    const user = appData.users.find(
+      (item) => item.username.toLowerCase() === username.trim().toLowerCase() && item.password === password
+    );
+    if (!user) return false;
+    setAuthUser(user);
+    setView(user.role === "admin" ? "admin" : "tests");
+    sessionStorage.setItem("controlled-practice-user-id", user.id);
+    return true;
+  };
+
+  const logout = () => {
+    reset();
+    setAuthUser(null);
+    setView("tests");
+    sessionStorage.removeItem("controlled-practice-user-id");
+  };
+
+  const createUser = (user) => {
+    const exists = appData.users.some((item) => item.username.toLowerCase() === user.username.toLowerCase());
+    if (exists) return { ok: false, message: "That username already exists." };
+    const nextUser = {
+      ...user,
+      id: crypto.randomUUID(),
+      role: "student",
+      createdAt: new Date().toISOString(),
+    };
+    setAppData((current) => {
+      const next = { ...current, users: [...current.users, nextUser] };
+      saveData(next);
+      return next;
+    });
+    return { ok: true, message: "Student user created." };
+  };
+
+  if (!authUser) {
+    return <LoginPage onLogin={login} />;
+  }
+
+  if (view === "admin" && authUser.role === "admin") {
+    return (
+      <AdminConsole
+        data={appData}
+        onCreateUser={createUser}
+        onLogout={logout}
+        onTakeTest={() => setView("tests")}
+      />
+    );
+  }
+
   return (
     <main>
       <aside className="sidebar">
@@ -197,6 +321,15 @@ function App() {
             <h1>Controlled Practice Lab</h1>
             <p>{selectedSubject.subtitle}</p>
           </div>
+        </div>
+
+        <div className="account-box">
+          <strong>{authUser.name}</strong>
+          <span>{authUser.role === "admin" ? "Admin" : "Student"}</span>
+          {authUser.role === "admin" && (
+            <button className="mini-button" onClick={() => setView("admin")} disabled={started}>Admin Console</button>
+          )}
+          <button className="mini-button" onClick={logout}>Sign out</button>
         </div>
 
         <div className="subject-tabs" aria-label="Subject">
@@ -318,6 +451,158 @@ function App() {
             )}
           </>
         )}
+      </section>
+    </main>
+  );
+}
+
+function LoginPage({ onLogin }) {
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("admin123");
+  const [error, setError] = useState("");
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <Shield size={38} />
+        <p className="eyebrow">Controlled Practice Lab</p>
+        <h1>Sign in to start a test</h1>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          const ok = onLogin(username, password);
+          setError(ok ? "" : "Username or password is incorrect.");
+        }}>
+          <label>
+            Username
+            <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+          </label>
+          <label>
+            Password
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" />
+          </label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary" type="submit">Sign In</button>
+        </form>
+        <p className="hint">Seed admin: username <b>admin</b>, password <b>admin123</b>. Change this when a real database-backed auth layer is added.</p>
+      </section>
+    </main>
+  );
+}
+
+function AdminConsole({ data, onCreateUser, onLogout, onTakeTest }) {
+  const [form, setForm] = useState({ name: "", username: "", password: "" });
+  const [message, setMessage] = useState("");
+  const students = data.users.filter((user) => user.role === "student");
+  const average = data.attempts.length
+    ? Math.round(data.attempts.reduce((sum, attempt) => sum + attempt.percent, 0) / data.attempts.length)
+    : 0;
+
+  return (
+    <main className="admin-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <Shield aria-hidden="true" />
+          <div>
+            <h1>Admin Console</h1>
+            <p>Users, attempts, and warning insight</p>
+          </div>
+        </div>
+        <div className="admin-nav">
+          <button className="test-button active" onClick={onTakeTest}><FileText size={18} /> Practice Tests <ChevronRight size={16} /></button>
+          <button className="test-button" onClick={onLogout}><Lock size={18} /> Sign Out <ChevronRight size={16} /></button>
+        </div>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Overview</p>
+            <h2>Student Activity</h2>
+          </div>
+          <div className="status-strip">
+            <span><UserPlus size={16} /> {students.length} students</span>
+            <span><FileText size={16} /> {data.attempts.length} attempts</span>
+            <span><Calculator size={16} /> {average}% average</span>
+          </div>
+        </header>
+
+        <section className="admin-grid">
+          <article className="admin-card">
+            <h3>Create Student</h3>
+            <form onSubmit={(event) => {
+              event.preventDefault();
+              const result = onCreateUser(form);
+              setMessage(result.message);
+              if (result.ok) setForm({ name: "", username: "", password: "" });
+            }}>
+              <label>
+                Student name
+                <input value={form.name} required onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+              </label>
+              <label>
+                Username
+                <input value={form.username} required onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} />
+              </label>
+              <label>
+                Temporary password
+                <input value={form.password} required onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+              </label>
+              {message && <p className="hint">{message}</p>}
+              <button className="primary" type="submit"><Plus size={18} /> Create User</button>
+            </form>
+          </article>
+
+          <article className="admin-card">
+            <h3>Students</h3>
+            <div className="student-list">
+              {students.length === 0 ? (
+                <p className="hint">No student users yet.</p>
+              ) : students.map((student) => {
+                const attempts = data.attempts.filter((attempt) => attempt.userId === student.id);
+                return (
+                  <div key={student.id} className="student-row">
+                    <div>
+                      <strong>{student.name}</strong>
+                      <span>@{student.username}</span>
+                    </div>
+                    <b>{attempts.length} attempts</b>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        </section>
+
+        <section className="admin-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Attempts</p>
+              <h3>Test History</h3>
+            </div>
+          </div>
+          <div className="attempt-table">
+            <div className="attempt-row attempt-head">
+              <span>Student</span>
+              <span>Test</span>
+              <span>Score</span>
+              <span>Time</span>
+              <span>Warnings</span>
+              <span>Submitted</span>
+            </div>
+            {data.attempts.length === 0 ? (
+              <p className="hint">No attempts recorded yet. Attempts are saved when a user submits or times out.</p>
+            ) : data.attempts.map((attempt) => (
+              <div className="attempt-row" key={attempt.id}>
+                <span>{attempt.userName}</span>
+                <span>{attempt.subject} - {attempt.testTitle}</span>
+                <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
+                <span>{formatDuration(attempt.elapsedSeconds)}</span>
+                <span>{attempt.warnings}</span>
+                <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </section>
     </main>
   );
