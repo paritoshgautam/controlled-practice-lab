@@ -148,6 +148,14 @@ function App() {
     return { rows, total, percent: total / selectedTest.questions.length };
   }, [answers, selectedTest]);
 
+  const answered = selectedTest.questions.filter((question) => {
+    const answer = answers[question.id];
+    if (question.type === "mc_work") {
+      return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
+    }
+    return answer !== undefined && String(answer).trim() !== "";
+  }).length;
+
   useEffect(() => {
     if (!started || submitted) return;
 
@@ -272,13 +280,6 @@ function App() {
   const elapsedSeconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
   const remainingSeconds = Math.max(0, (selectedTest.timeLimitMinutes || 60) * 60 - elapsedSeconds);
   const remainingLabel = `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, "0")}`;
-  const answered = selectedTest.questions.filter((question) => {
-    const answer = answers[question.id];
-    if (question.type === "mc_work") {
-      return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
-    }
-    return answer !== undefined && String(answer).trim() !== "";
-  }).length;
 
   const login = (username, password) => {
     const user = appData.users.find(
