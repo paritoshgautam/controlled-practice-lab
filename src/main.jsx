@@ -424,6 +424,55 @@ function App() {
     return { ok: true, message: "Student user created." };
   };
 
+  const resetStudentPassword = async (studentId, password) => {
+    const nextPassword = password.trim();
+    if (!nextPassword) return { ok: false, message: "Enter a new password." };
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.rpc("reset_student_password", {
+        p_admin_id: authUser.id,
+        p_student_id: studentId,
+        p_password: nextPassword,
+      });
+      if (error) return { ok: false, message: error.message };
+      await refreshAdminData(authUser.id);
+    } else {
+      setAppData((current) => {
+        const next = {
+          ...current,
+          users: current.users.map((user) => (
+            user.id === studentId && user.role === "student"
+              ? { ...user, password: nextPassword }
+              : user
+          )),
+        };
+        saveData(next);
+        return next;
+      });
+    }
+    return { ok: true, message: "Password updated." };
+  };
+
+  const deleteStudent = async (studentId) => {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.rpc("delete_student_user", {
+        p_admin_id: authUser.id,
+        p_student_id: studentId,
+      });
+      if (error) return { ok: false, message: error.message };
+      await refreshAdminData(authUser.id);
+    } else {
+      setAppData((current) => {
+        const next = {
+          users: current.users.filter((user) => user.id !== studentId || user.role !== "student"),
+          attempts: current.attempts.filter((attempt) => attempt.userId !== studentId),
+        };
+        saveData(next);
+        return next;
+      });
+    }
+    return { ok: true, message: "Student deleted." };
+  };
+
   if (!authUser) {
     return <LoginPage authError={authError} dataMode={isSupabaseConfigured ? "Supabase" : "Local browser"} onLogin={login} />;
   }
@@ -435,7 +484,9 @@ function App() {
         dataError={dataError}
         dataMode={isSupabaseConfigured ? "Supabase" : "Local browser"}
         onCreateUser={createUser}
+        onDeleteStudent={deleteStudent}
         onLogout={logout}
+        onResetStudentPassword={resetStudentPassword}
         onTakeTest={() => setView("tests")}
       />
     );
@@ -618,9 +669,11 @@ function LoginPage({ authError, dataMode, onLogin }) {
   );
 }
 
-function AdminConsole({ data, dataError, dataMode, onCreateUser, onLogout, onTakeTest }) {
+function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent, onLogout, onResetStudentPassword, onTakeTest }) {
   const [form, setForm] = useState({ name: "", username: "", password: "" });
   const [message, setMessage] = useState("");
+  const [studentMessages, setStudentMessages] = useState({});
+  const [passwordDrafts, setPasswordDrafts] = useState({});
   const students = data.users.filter((user) => user.role === "student");
   const average = data.attempts.length
     ? Math.round(data.attempts.reduce((sum, attempt) => sum + attempt.percent, 0) / data.attempts.length)
@@ -696,8 +749,30 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onLogout, onTak
                     <div>
                       <strong>{student.name}</strong>
                       <span>@{student.username}</span>
+                      {studentMessages[student.id] && <small>{studentMessages[student.id]}</small>}
                     </div>
                     <b>{attempts.length} attempts</b>
+                    <form className="student-actions" onSubmit={async (event) => {
+                      event.preventDefault();
+                      const result = await onResetStudentPassword(student.id, passwordDrafts[student.id] || "");
+                      setStudentMessages((current) => ({ ...current, [student.id]: result.message }));
+                      if (result.ok) setPasswordDrafts((current) => ({ ...current, [student.id]: "" }));
+                    }}>
+                      <input
+                        aria-label={`New password for ${student.name}`}
+                        placeholder="New password"
+                        type="password"
+                        value={passwordDrafts[student.id] || ""}
+                        onChange={(event) => setPasswordDrafts((current) => ({ ...current, [student.id]: event.target.value }))}
+                      />
+                      <button className="secondary" type="submit">Reset</button>
+                      <button className="danger" type="button" onClick={async () => {
+                        const confirmed = window.confirm(`Delete ${student.name}? This will also remove their attempts.`);
+                        if (!confirmed) return;
+                        const result = await onDeleteStudent(student.id);
+                        setStudentMessages((current) => ({ ...current, [student.id]: result.message }));
+                      }}>Delete</button>
+                    </form>
                   </div>
                 );
               })}
