@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { tests as physicsTests } from "./mockTests";
 import { mathTests } from "./mathTests";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import "./styles.css";
 
 const subjects = [
@@ -116,6 +117,31 @@ const scoreQuestion = (question, answer) => {
 
 const pct = (value) => `${Math.round(value * 100)}%`;
 
+const mapSupabaseUser = (user) => ({
+  id: user.id,
+  name: user.name,
+  username: user.username,
+  role: user.role,
+  createdAt: user.created_at,
+});
+
+const mapSupabaseAttempt = (attempt) => ({
+  id: attempt.id,
+  userId: attempt.user_id,
+  userName: attempt.user_name,
+  username: attempt.username,
+  subject: attempt.subject,
+  testId: attempt.test_id,
+  testTitle: attempt.test_title,
+  score: Number(attempt.score),
+  total: attempt.total,
+  percent: attempt.percent,
+  answered: attempt.answered,
+  warnings: attempt.warnings,
+  elapsedSeconds: attempt.elapsed_seconds,
+  submittedAt: attempt.submitted_at,
+});
+
 function App() {
   const [appData, setAppData] = useState(loadData);
   const [authUser, setAuthUser] = useState(() => {
@@ -127,6 +153,8 @@ function App() {
     }
   });
   const [view, setView] = useState("tests");
+  const [authError, setAuthError] = useState("");
+  const [dataError, setDataError] = useState("");
   const [selectedSubjectId, setSelectedSubjectId] = useState("physics");
   const [selectedId, setSelectedId] = useState(1);
   const [started, setStarted] = useState(false);
@@ -234,11 +262,30 @@ function App() {
       elapsedSeconds: elapsed,
       submittedAt: new Date().toISOString(),
     };
-    setAppData((current) => {
-      const next = { ...current, attempts: [attempt, ...current.attempts] };
-      saveData(next);
-      return next;
-    });
+    if (isSupabaseConfigured) {
+      supabase.rpc("record_attempt", {
+        p_user_id: attempt.userId,
+        p_user_name: attempt.userName,
+        p_username: attempt.username,
+        p_subject: attempt.subject,
+        p_test_id: attempt.testId,
+        p_test_title: attempt.testTitle,
+        p_score: attempt.score,
+        p_total: attempt.total,
+        p_percent: attempt.percent,
+        p_answered: attempt.answered,
+        p_warnings: attempt.warnings,
+        p_elapsed_seconds: attempt.elapsedSeconds,
+      }).then(({ error }) => {
+        if (error) setDataError(error.message);
+      });
+    } else {
+      setAppData((current) => {
+        const next = { ...current, attempts: [attempt, ...current.attempts] };
+        saveData(next);
+        return next;
+      });
+    }
     setAttemptSaved(true);
   }, [answered, attemptSaved, authUser, results.percent, results.total, selectedTest, startedAt, submitted, warnings.length]);
 
@@ -281,13 +328,47 @@ function App() {
   const remainingSeconds = Math.max(0, (selectedTest.timeLimitMinutes || 60) * 60 - elapsedSeconds);
   const remainingLabel = `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, "0")}`;
 
-  const login = (username, password) => {
-    const user = appData.users.find(
-      (item) => item.username.toLowerCase() === username.trim().toLowerCase() && item.password === password
-    );
+  const refreshAdminData = async (adminId) => {
+    if (!isSupabaseConfigured) return;
+    const [{ data: users, error: usersError }, { data: attempts, error: attemptsError }] = await Promise.all([
+      supabase.rpc("list_app_users", { p_admin_id: adminId }),
+      supabase.rpc("list_attempts", { p_admin_id: adminId }),
+    ]);
+    if (usersError || attemptsError) {
+      setDataError(usersError?.message || attemptsError?.message || "Could not load admin data.");
+      return;
+    }
+    setDataError("");
+    setAppData({
+      users: users.map(mapSupabaseUser),
+      attempts: attempts.map(mapSupabaseAttempt),
+    });
+  };
+
+  const login = async (username, password) => {
+    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedPassword = password.trim();
+    setAuthError("");
+    let user = null;
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.rpc("login_user", {
+        p_username: normalizedUsername,
+        p_password: normalizedPassword,
+      });
+      if (error) {
+        setAuthError(error.message);
+        return false;
+      }
+      user = data?.[0] ? mapSupabaseUser(data[0]) : null;
+    } else {
+      user = appData.users.find(
+        (item) => item.username.toLowerCase() === normalizedUsername && item.password === normalizedPassword
+      );
+    }
     if (!user) return false;
     setAuthUser(user);
     setView(user.role === "admin" ? "admin" : "tests");
+    if (user.role === "admin") refreshAdminData(user.id);
     try {
       window.sessionStorage.setItem("controlled-practice-user-id", user.id);
     } catch {
@@ -307,31 +388,52 @@ function App() {
     }
   };
 
-  const createUser = (user) => {
-    const exists = appData.users.some((item) => item.username.toLowerCase() === user.username.toLowerCase());
-    if (exists) return { ok: false, message: "That username already exists." };
-    const nextUser = {
-      ...user,
-      id: crypto.randomUUID(),
-      role: "student",
-      createdAt: new Date().toISOString(),
-    };
-    setAppData((current) => {
-      const next = { ...current, users: [...current.users, nextUser] };
-      saveData(next);
-      return next;
-    });
+  const createUser = async (user) => {
+    const nextName = user.name.trim();
+    const nextUsername = user.username.trim().toLowerCase();
+    const nextPassword = user.password.trim();
+    if (!nextName || !nextUsername || !nextPassword) {
+      return { ok: false, message: "Name, username, and password are required." };
+    }
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.rpc("create_student_user", {
+        p_admin_id: authUser.id,
+        p_name: nextName,
+        p_username: nextUsername,
+        p_password: nextPassword,
+      });
+      if (error) return { ok: false, message: error.message };
+      await refreshAdminData(authUser.id);
+    } else {
+      const exists = appData.users.some((item) => item.username.toLowerCase() === nextUsername);
+      if (exists) return { ok: false, message: "That username already exists." };
+      const nextUser = {
+        id: crypto.randomUUID(),
+        name: nextName,
+        username: nextUsername,
+        password: nextPassword,
+        role: "student",
+        createdAt: new Date().toISOString(),
+      };
+      setAppData((current) => {
+        const next = { ...current, users: [...current.users, nextUser] };
+        saveData(next);
+        return next;
+      });
+    }
     return { ok: true, message: "Student user created." };
   };
 
   if (!authUser) {
-    return <LoginPage onLogin={login} />;
+    return <LoginPage authError={authError} dataMode={isSupabaseConfigured ? "Supabase" : "Local browser"} onLogin={login} />;
   }
 
   if (view === "admin" && authUser.role === "admin") {
     return (
       <AdminConsole
         data={appData}
+        dataError={dataError}
+        dataMode={isSupabaseConfigured ? "Supabase" : "Local browser"}
         onCreateUser={createUser}
         onLogout={logout}
         onTakeTest={() => setView("tests")}
@@ -483,7 +585,7 @@ function App() {
   );
 }
 
-function LoginPage({ onLogin }) {
+function LoginPage({ authError, dataMode, onLogin }) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
@@ -494,9 +596,9 @@ function LoginPage({ onLogin }) {
         <Shield size={38} />
         <p className="eyebrow">Controlled Practice Lab</p>
         <h1>Sign in to start a test</h1>
-        <form onSubmit={(event) => {
+        <form onSubmit={async (event) => {
           event.preventDefault();
-          const ok = onLogin(username, password);
+          const ok = await onLogin(username, password);
           setError(ok ? "" : "Username or password is incorrect.");
         }}>
           <label>
@@ -507,16 +609,16 @@ function LoginPage({ onLogin }) {
             Password
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" />
           </label>
-          {error && <p className="form-error">{error}</p>}
+          {(error || authError) && <p className="form-error">{authError || error}</p>}
           <button className="primary" type="submit">Sign In</button>
         </form>
-        <p className="hint">Seed admin: username <b>admin</b>, password <b>admin123</b>. Change this when a real database-backed auth layer is added.</p>
+        <p className="hint">Data mode: <b>{dataMode}</b>. Seed admin: username <b>admin</b>, password <b>admin123</b>.</p>
       </section>
     </main>
   );
 }
 
-function AdminConsole({ data, onCreateUser, onLogout, onTakeTest }) {
+function AdminConsole({ data, dataError, dataMode, onCreateUser, onLogout, onTakeTest }) {
   const [form, setForm] = useState({ name: "", username: "", password: "" });
   const [message, setMessage] = useState("");
   const students = data.users.filter((user) => user.role === "student");
@@ -547,18 +649,21 @@ function AdminConsole({ data, onCreateUser, onLogout, onTakeTest }) {
             <h2>Student Activity</h2>
           </div>
           <div className="status-strip">
+            <span><Shield size={16} /> {dataMode}</span>
             <span><UserPlus size={16} /> {students.length} students</span>
             <span><FileText size={16} /> {data.attempts.length} attempts</span>
             <span><Calculator size={16} /> {average}% average</span>
           </div>
         </header>
 
+        {dataError && <section className="warning-log"><strong>Database warning</strong><div><span>{dataError}</span></div></section>}
+
         <section className="admin-grid">
           <article className="admin-card">
             <h3>Create Student</h3>
-            <form onSubmit={(event) => {
+            <form onSubmit={async (event) => {
               event.preventDefault();
-              const result = onCreateUser(form);
+              const result = await onCreateUser(form);
               setMessage(result.message);
               if (result.ok) setForm({ name: "", username: "", password: "" });
             }}>

@@ -11,7 +11,23 @@ username: admin
 password: admin123
 ```
 
-The current admin console uses browser local storage so it can run as a static Vercel app. That is useful for a parent-managed single browser, but true multi-device student tracking should use a hosted database/auth provider such as Supabase, Firebase, or Vercel Postgres.
+When Supabase environment variables are configured, users and attempts are stored in Supabase. Without those variables, the app falls back to browser local storage for local testing.
+
+## Supabase Setup
+
+1. Open your Supabase project.
+2. Go to SQL Editor.
+3. Run [supabase/schema.sql](/supabase/schema.sql).
+4. Copy your Project URL and anon public key from Project Settings > API.
+5. Create `.env.local`:
+
+```bash
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
+
+6. In Vercel, add the same environment variables for Production.
+7. Redeploy.
 
 ## Run Locally
 
