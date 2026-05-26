@@ -140,7 +140,30 @@ const mapSupabaseAttempt = (attempt) => ({
   warnings: attempt.warnings,
   elapsedSeconds: attempt.elapsed_seconds,
   submittedAt: attempt.submitted_at,
+  details: attempt.details || [],
 });
+
+const getConcept = (question) => question.topic || question.rubric || question.type;
+
+const getStudentInsights = (student, attempts) => {
+  const studentAttempts = attempts.filter((attempt) => attempt.userId === student.id);
+  const conceptMap = new Map();
+  for (const attempt of studentAttempts) {
+    for (const detail of attempt.details || []) {
+      const concept = detail.concept || "Mixed concept";
+      const current = conceptMap.get(concept) || { concept, missed: 0, total: 0 };
+      current.total += 1;
+      if (!detail.correct) current.missed += 1;
+      conceptMap.set(concept, current);
+    }
+  }
+  return {
+    attempts: studentAttempts,
+    concepts: [...conceptMap.values()]
+      .filter((item) => item.missed > 0)
+      .sort((a, b) => b.missed - a.missed || b.total - a.total),
+  };
+};
 
 function App() {
   const [appData, setAppData] = useState(loadData);
@@ -261,6 +284,15 @@ function App() {
       warnings: warnings.length,
       elapsedSeconds: elapsed,
       submittedAt: new Date().toISOString(),
+      details: results.rows.map((row) => ({
+        questionNumber: row.index + 1,
+        questionId: row.question.id,
+        concept: getConcept(row.question),
+        type: row.question.type,
+        prompt: row.question.prompt,
+        earned: Number(row.earned.toFixed(2)),
+        correct: row.earned >= 0.99,
+      })),
     };
     if (isSupabaseConfigured) {
       supabase.rpc("record_attempt", {
@@ -276,6 +308,7 @@ function App() {
         p_answered: attempt.answered,
         p_warnings: attempt.warnings,
         p_elapsed_seconds: attempt.elapsedSeconds,
+        p_details: attempt.details,
       }).then(({ error }) => {
         if (error) setDataError(error.message);
       });
@@ -674,7 +707,10 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
   const [message, setMessage] = useState("");
   const [studentMessages, setStudentMessages] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
+  const [selectedStudentId, setSelectedStudentId] = useState("");
   const students = data.users.filter((user) => user.role === "student");
+  const selectedStudent = students.find((student) => student.id === selectedStudentId) || students[0];
+  const selectedInsights = selectedStudent ? getStudentInsights(selectedStudent, data.attempts) : null;
   const average = data.attempts.length
     ? Math.round(data.attempts.reduce((sum, attempt) => sum + attempt.percent, 0) / data.attempts.length)
     : 0;
@@ -710,6 +746,79 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
         </header>
 
         {dataError && <section className="warning-log"><strong>Database warning</strong><div><span>{dataError}</span></div></section>}
+
+        <section className="admin-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Student Dashboard</p>
+              <h3>Performance by Test and Concept</h3>
+            </div>
+            {students.length > 0 && (
+              <select
+                className="student-select"
+                value={selectedStudent?.id || ""}
+                onChange={(event) => setSelectedStudentId(event.target.value)}
+              >
+                {students.map((student) => (
+                  <option key={student.id} value={student.id}>{student.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          {!selectedStudent || !selectedInsights ? (
+            <p className="hint">Create a student and submit a test to see performance insights.</p>
+          ) : (
+            <div className="dashboard-grid">
+              <div className="dashboard-panel">
+                <h4>Tests Attempted</h4>
+                {selectedInsights.attempts.length === 0 ? (
+                  <p className="hint">No attempts yet.</p>
+                ) : selectedInsights.attempts.map((attempt) => (
+                  <div className="metric-row" key={attempt.id}>
+                    <div>
+                      <strong>{attempt.subject} - {attempt.testTitle}</strong>
+                      <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
+                    </div>
+                    <b>{attempt.percent}%</b>
+                  </div>
+                ))}
+              </div>
+              <div className="dashboard-panel">
+                <h4>Concepts to Review</h4>
+                {selectedInsights.concepts.length === 0 ? (
+                  <p className="hint">No missed concepts recorded for this student.</p>
+                ) : selectedInsights.concepts.slice(0, 8).map((concept) => (
+                  <div className="metric-row" key={concept.concept}>
+                    <div>
+                      <strong>{concept.concept}</strong>
+                      <span>{concept.missed} missed out of {concept.total} question(s)</span>
+                    </div>
+                    <b>{Math.round((concept.missed / concept.total) * 100)}%</b>
+                  </div>
+                ))}
+              </div>
+              <div className="dashboard-panel wide">
+                <h4>Missed Questions</h4>
+                {selectedInsights.attempts.flatMap((attempt) => (
+                  (attempt.details || [])
+                    .filter((detail) => !detail.correct)
+                    .map((detail) => ({ ...detail, attempt }))
+                )).length === 0 ? (
+                  <p className="hint">No missed question detail yet. Older attempts may not have concept-level data.</p>
+                ) : selectedInsights.attempts.flatMap((attempt) => (
+                  (attempt.details || [])
+                    .filter((detail) => !detail.correct)
+                    .map((detail) => (
+                      <div className="missed-row" key={`${attempt.id}-${detail.questionId}`}>
+                        <strong>{attempt.testTitle} Q{detail.questionNumber}: {detail.concept}</strong>
+                        <span>{detail.prompt}</span>
+                      </div>
+                    ))
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="admin-grid">
           <article className="admin-card">

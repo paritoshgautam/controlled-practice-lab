@@ -606,7 +606,61 @@ textarea {
 .section-heading {
   align-items: center;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
+}
+
+.student-select {
+  border: 1px solid #cbd4cf;
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-panel {
+  border: 1px solid #dfe4df;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.dashboard-panel.wide {
+  grid-column: 1 / -1;
+}
+
+.dashboard-panel h4 {
+  margin: 0;
+}
+
+.metric-row,
+.missed-row {
+  border-top: 1px solid #e5ebe7;
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.metric-row {
+  align-items: center;
+  grid-template-columns: 1fr auto;
+}
+
+.metric-row div,
+.missed-row {
+  min-width: 0;
+}
+
+.metric-row span,
+.missed-row span {
+  color: #526165;
+  line-height: 1.45;
 }
 
 .attempt-table {
@@ -656,6 +710,10 @@ textarea {
   }
 
   .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 

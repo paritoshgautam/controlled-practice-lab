@@ -23,8 +23,12 @@ create table if not exists public.test_attempts (
   answered integer not null,
   warnings integer not null,
   elapsed_seconds integer not null,
+  details jsonb not null default '[]'::jsonb,
   submitted_at timestamptz not null default now()
 );
+
+alter table public.test_attempts
+add column if not exists details jsonb not null default '[]'::jsonb;
 
 alter table public.app_users enable row level security;
 alter table public.test_attempts enable row level security;
@@ -184,7 +188,8 @@ create or replace function public.record_attempt(
   p_percent integer,
   p_answered integer,
   p_warnings integer,
-  p_elapsed_seconds integer
+  p_elapsed_seconds integer,
+  p_details jsonb default '[]'::jsonb
 )
 returns uuid
 language plpgsql
@@ -196,11 +201,11 @@ declare
 begin
   insert into public.test_attempts (
     user_id, user_name, username, subject, test_id, test_title, score,
-    total, percent, answered, warnings, elapsed_seconds
+    total, percent, answered, warnings, elapsed_seconds, details
   )
   values (
     p_user_id, p_user_name, p_username, p_subject, p_test_id, p_test_title, p_score,
-    p_total, p_percent, p_answered, p_warnings, p_elapsed_seconds
+    p_total, p_percent, p_answered, p_warnings, p_elapsed_seconds, coalesce(p_details, '[]'::jsonb)
   )
   returning id into new_id;
 
@@ -223,6 +228,7 @@ returns table (
   answered integer,
   warnings integer,
   elapsed_seconds integer,
+  details jsonb,
   submitted_at timestamptz
 )
 language plpgsql
@@ -240,7 +246,7 @@ begin
   return query
   select a.id, a.user_id, a.user_name, a.username, a.subject, a.test_id,
          a.test_title, a.score, a.total, a.percent, a.answered, a.warnings,
-         a.elapsed_seconds, a.submitted_at
+         a.elapsed_seconds, a.details, a.submitted_at
   from public.test_attempts a
   order by a.submitted_at desc;
 end;
@@ -251,5 +257,5 @@ grant execute on function public.create_student_user(uuid, text, text, text) to 
 grant execute on function public.list_app_users(uuid) to anon, authenticated;
 grant execute on function public.reset_student_password(uuid, uuid, text) to anon, authenticated;
 grant execute on function public.delete_student_user(uuid, uuid) to anon, authenticated;
-grant execute on function public.record_attempt(uuid, text, text, text, integer, text, numeric, integer, integer, integer, integer, integer) to anon, authenticated;
+grant execute on function public.record_attempt(uuid, text, text, text, integer, text, numeric, integer, integer, integer, integer, integer, jsonb) to anon, authenticated;
 grant execute on function public.list_attempts(uuid) to anon, authenticated;
