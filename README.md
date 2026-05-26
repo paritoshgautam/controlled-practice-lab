@@ -2,15 +2,6 @@
 
 A Vercel-ready React app for controlled Physics and Math practice tests.
 
-## Admin Login
-
-Seed admin credentials:
-
-```text
-username: admin
-password: admin123
-```
-
 When Supabase environment variables are configured, users and attempts are stored in Supabase. Without those variables, the app falls back to browser local storage for local testing.
 
 ## Supabase Setup
@@ -28,6 +19,8 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 6. In Vercel, add the same environment variables for Production.
 7. Redeploy.
+
+To update an existing Supabase project that already ran the first schema, run [supabase/update-admin-password.sql](/supabase/update-admin-password.sql).
 
 ## Run Locally
 

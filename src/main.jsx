@@ -49,7 +49,7 @@ const defaultData = {
       id: "admin-default",
       name: "Parent Admin",
       username: "admin",
-      password: "admin123",
+      password: "local-admin-only",
       role: "admin",
       createdAt: new Date().toISOString(),
     },
@@ -586,8 +586,8 @@ function App() {
 }
 
 function LoginPage({ authError, dataMode, onLogin }) {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   return (
@@ -612,7 +612,7 @@ function LoginPage({ authError, dataMode, onLogin }) {
           {(error || authError) && <p className="form-error">{authError || error}</p>}
           <button className="primary" type="submit">Sign In</button>
         </form>
-        <p className="hint">Data mode: <b>{dataMode}</b>. Seed admin: username <b>admin</b>, password <b>admin123</b>.</p>
+        <p className="hint">Data mode: <b>{dataMode}</b>.</p>
       </section>
     </main>
   );

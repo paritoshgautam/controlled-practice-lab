@@ -33,8 +33,10 @@ revoke all on public.app_users from anon, authenticated;
 revoke all on public.test_attempts from anon, authenticated;
 
 insert into public.app_users (name, username, password_hash, role)
-values ('Parent Admin', 'admin', crypt('admin123', gen_salt('bf')), 'admin')
-on conflict (username) do nothing;
+values ('Parent Admin', 'admin', extensions.crypt('CHANGE_THIS_ADMIN_PASSWORD', extensions.gen_salt('bf')), 'admin')
+on conflict (username) do update
+set password_hash = excluded.password_hash,
+    role = 'admin';
 
 create or replace function public.login_user(p_username text, p_password text)
 returns table (
@@ -53,7 +55,7 @@ begin
   select u.id, u.name, u.username, u.role, u.created_at
   from public.app_users u
   where lower(u.username) = lower(trim(p_username))
-    and u.password_hash = crypt(trim(p_password), u.password_hash);
+    and u.password_hash = extensions.crypt(trim(p_password), u.password_hash);
 end;
 $$;
 
@@ -84,7 +86,7 @@ begin
 
   return query
   insert into public.app_users (name, username, password_hash, role)
-  values (trim(p_name), lower(trim(p_username)), crypt(trim(p_password), gen_salt('bf')), 'student')
+  values (trim(p_name), lower(trim(p_username)), extensions.crypt(trim(p_password), extensions.gen_salt('bf')), 'student')
   returning app_users.id, app_users.name, app_users.username, app_users.role, app_users.created_at;
 end;
 $$;
