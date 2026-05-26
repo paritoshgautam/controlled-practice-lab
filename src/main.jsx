@@ -93,7 +93,7 @@ const formatDuration = (seconds) => {
 };
 
 const scoreOpen = (answer, keywords) => {
-  const normalized = answer.toLowerCase();
+  const normalized = String(answer || "").toLowerCase();
   const hits = keywords.filter((word) => normalized.includes(String(word).toLowerCase()));
   return Math.min(1, hits.length / Math.max(4, keywords.length));
 };
@@ -106,6 +106,11 @@ const scoreQuestion = (question, answer) => {
     const choiceScore = Number(answer?.choice) === question.answer ? 0.7 : 0;
     const workScore = scoreOpen(answer?.work || "", question.keywords) * 0.3;
     return choiceScore + workScore;
+  }
+  if (question.type === "work_upload") {
+    const workScore = scoreOpen(answer?.work || "", question.keywords);
+    if (workScore > 0) return workScore;
+    return answer?.fileName ? 0.25 : 0;
   }
   if (question.type === "numeric") {
     const value = Number(answer);
@@ -204,6 +209,9 @@ function App() {
     if (question.type === "mc_work") {
       return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
     }
+    if (question.type === "work_upload") {
+      return String(answer?.work || "").trim() !== "" || Boolean(answer?.fileName);
+    }
     return answer !== undefined && String(answer).trim() !== "";
   }).length;
 
@@ -292,6 +300,7 @@ function App() {
         prompt: row.question.prompt,
         earned: Number(row.earned.toFixed(2)),
         correct: row.earned >= 0.99,
+        roughWorkFile: answers[row.question.id]?.fileName || null,
       })),
     };
     if (isSupabaseConfigured) {
@@ -812,6 +821,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
                       <div className="missed-row" key={`${attempt.id}-${detail.questionId}`}>
                         <strong>{attempt.testTitle} Q{detail.questionNumber}: {detail.concept}</strong>
                         <span>{detail.prompt}</span>
+                        {detail.roughWorkFile && <em>Rough work: {detail.roughWorkFile}</em>}
                       </div>
                     ))
                 ))}
@@ -926,15 +936,29 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
 
 function Question({ index, question, value, locked, score, onChange }) {
   const correct = score >= 0.99;
-  const typeLabel = question.type === "open"
-    ? "Open ended"
+  const typeLabel = question.type === "work_upload"
+    ? "Show your work"
     : question.type === "numeric"
       ? "Calculation"
       : question.type === "mc_work"
         ? "MC + work"
         : "Multiple choice";
   const workValue = typeof value === "object" && value !== null ? value.work || "" : "";
+  const fileName = typeof value === "object" && value !== null ? value.fileName || "" : "";
   const choiceValue = typeof value === "object" && value !== null ? value.choice : value;
+  const updateWorkValue = (nextWork) => onChange({
+    ...(typeof value === "object" && value !== null ? value : {}),
+    choice: question.type === "mc_work" ? choiceValue : undefined,
+    work: nextWork,
+  });
+  const updateFileValue = (file) => onChange({
+    ...(typeof value === "object" && value !== null ? value : {}),
+    choice: question.type === "mc_work" ? choiceValue : undefined,
+    work: workValue,
+    fileName: file?.name || "",
+    fileType: file?.type || "",
+    fileSize: file?.size || 0,
+  });
   return (
     <article className={locked ? "question reviewed" : "question"}>
       <div className="question-head">
@@ -957,7 +981,7 @@ function Question({ index, question, value, locked, score, onChange }) {
                 value={optionIndex}
                 checked={String(choiceValue) === String(optionIndex)}
                 disabled={locked}
-                onChange={() => onChange(question.type === "mc_work" ? { choice: String(optionIndex), work: workValue } : String(optionIndex))}
+                onChange={() => onChange(question.type === "mc_work" ? { choice: String(optionIndex), work: workValue, fileName } : String(optionIndex))}
               />
               <span>{option}</span>
             </label>
@@ -965,13 +989,25 @@ function Question({ index, question, value, locked, score, onChange }) {
         </div>
       )}
 
-      {question.type === "mc_work" && (
-        <textarea
-          value={workValue}
-          disabled={locked}
-          onChange={(event) => onChange({ choice: choiceValue, work: event.target.value })}
-          placeholder="Show your reasoning. Include the formula, rule, or restriction you used."
-        />
+      {(question.type === "mc_work" || question.type === "work_upload") && (
+        <div className="work-box">
+          <textarea
+            value={workValue}
+            disabled={locked}
+            onChange={(event) => updateWorkValue(event.target.value)}
+            placeholder="Show the steps you used. Include the formula, rule, substitution, restriction, or reasoning."
+          />
+          <label className="upload-line">
+            Upload rough work
+            <input
+              accept="image/*,.pdf"
+              disabled={locked}
+              type="file"
+              onChange={(event) => updateFileValue(event.target.files?.[0])}
+            />
+          </label>
+          {fileName && <p className="hint">Attached: {fileName}</p>}
+        </div>
       )}
 
       {question.type === "numeric" && (
@@ -988,22 +1024,14 @@ function Question({ index, question, value, locked, score, onChange }) {
         </div>
       )}
 
-      {question.type === "open" && (
-        <textarea
-          value={value}
-          disabled={locked}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="Write a complete explanation."
-        />
-      )}
-
       {locked && (
         <div className="feedback">
           <strong>{score.toFixed(1)} / 1 point</strong>
-          {question.type === "open" || question.type === "mc_work" ? (
+          {question.type === "work_upload" || question.type === "mc_work" ? (
             <>
-              <p>{question.rubric || "Reasoning credit is based on the selected answer plus relevant work."}</p>
+              <p>{question.rubric || "Reasoning credit is based on the selected answer plus relevant steps."}</p>
               <p><b>Model response:</b> {question.sample}</p>
+              {fileName && <p><b>Rough work uploaded:</b> {fileName}</p>}
               {question.explanation && <p>{question.explanation}</p>}
             </>
           ) : (

@@ -21,9 +21,9 @@ const choice = (id, prompt, options, answer, explanation) => ({
   explanation,
 });
 
-const open = (id, prompt, rubric, keywords, sample) => ({
+const workUpload = (id, prompt, rubric, keywords, sample) => ({
   id,
-  type: "open",
+  type: "work_upload",
   prompt,
   rubric,
   keywords,
@@ -185,11 +185,11 @@ function makeTest(n) {
     id: n,
     title: `Mock Test ${n}`,
     questions: [
-      open(`t${n}-term`, `Define ${term[0]}. Include its common variable, SI unit, unit symbol, and physical meaning.`, `Full credit: definition, variable, unit, unit symbol, and a usable physical meaning.`, [term[1].split(" ")[0], term[2], term[3], ...term[4].split(" ").slice(0, 3)], `${term[0]} is ${term[4]}. It is commonly represented by ${term[1]} and measured in ${term[2]} (${term[3]}).`),
+      choice(`t${n}-term`, `Which description correctly defines ${term[0]}?`, [`${term[0]} is ${term[4]}; variable ${term[1]}; unit ${term[2]} (${term[3]}).`, `${term[0]} is the same as voltage and is measured only in amperes.`, `${term[0]} is the stored charge in a circuit and has no SI unit.`, `${term[0]} is the length of a wire and is measured in meters per second.`], 0, `${term[0]} is ${term[4]}. It is commonly represented by ${term[1]} and measured in ${term[2]} (${term[3]}).`),
       coulombQuestion(n),
       chargeQuestion(n),
       ohmQuestion(n),
-      open(`t${n}-schematic`, `Describe how to draw a simple circuit with a battery, one resistor, an ammeter, and a voltmeter. Include polarity and conventional current direction.`, `Full credit: closed loop, battery polarity, conventional current from positive terminal, ammeter in series, voltmeter in parallel across the resistor.`, ["closed", "positive", "series", "parallel", "voltmeter", "ammeter"], "The battery and resistor form a closed loop. Conventional current leaves the positive terminal. The ammeter is placed in series, and the voltmeter is placed in parallel across the resistor."),
+      workUpload(`t${n}-schematic`, `Show your work for drawing a simple circuit with a battery, one resistor, an ammeter, and a voltmeter. Include polarity and conventional current direction.`, `Full credit: closed loop, battery polarity, conventional current from positive terminal, ammeter in series, voltmeter in parallel across the resistor.`, ["closed", "positive", "series", "parallel", "voltmeter", "ammeter"], "The battery and resistor form a closed loop. Conventional current leaves the positive terminal. The ammeter is placed in series, and the voltmeter is placed in parallel across the resistor."),
       seriesQuestion(n),
       parallelQuestion(n),
       choice(`t${n}-brightness-series`, `Two identical bulbs A and B are in series with a battery. How do their brightnesses compare?`, ["A and B have equal brightness.", "A is brighter because it is first.", "B is brighter because it is closer to the negative terminal.", "Both bulbs are off because series circuits cannot light two bulbs."], 0, "Identical series bulbs carry the same current and have equal resistance, so they dissipate equal power."),
@@ -202,9 +202,9 @@ function makeTest(n) {
       costQuestion(n),
       choice(`t${n}-ohmic`, `A filament lamp's current-voltage graph curves and gets less steep as voltage rises. What conclusion fits best?`, ["It is non-ohmic because resistance changes with temperature.", "It is ohmic because all lamps obey Ohm's law.", "It has zero resistance.", "Its current is independent of voltage."], 0, "A non-linear I-V graph means the resistance is not constant. A hot filament's resistance increases."),
       numeric(`t${n}-data-resistance`, `An ohmic resistor has data point V = ${7 + n * 0.5} V and I = ${fmt((7 + n * 0.5) / 150, 3)} A. Estimate its resistance.`, 150, "ohm", 4, "For an ohmic resistor, the slope V/I is the resistance."),
-      open(`t${n}-safety`, `Explain the function of a ${safety[0]} in household electrical safety.`, `Full credit: what the device senses or provides, what it does to the circuit, and the hazard it reduces.`, safety[1], safety[2]),
-      open(`t${n}-resistance-factor`, `What causes electrical resistance? Explain how this factor changes resistance: ${factor}.`, `Full credit: collisions/interaction of moving charges with atoms plus the named factor's effect on resistance.`, ["collisions", "charges", "atoms", ...factor.split(" ").slice(0, 3)], `Electrical resistance comes from moving charges interacting with atoms in the material. In general, ${factor}.`),
-      open(`t${n}-challenge`, `Three equal lamps E, F, and G are arranged with E in series with a parallel pair F and G. Predict what happens if F burns out, and rank brightness before the burnout.`, `Full credit: F opening leaves G still conducting with E in series; total resistance rises, so E and G become dimmer than before; before burnout E is brightest, F and G are equal and dimmer.`, ["parallel", "series", "E", "F", "G", "brightest", "dimmer"], "Before burnout, E is brightest because it carries the total current; F and G are equal and dimmer. If F burns out, G still works but the total circuit resistance increases, reducing current through E and G.")
+      choice(`t${n}-safety`, `Which statement best describes the function of a ${safety[0]}?`, [safety[2], "It increases household voltage so appliances use less current.", "It stores extra charge so lights stay on after power is off.", "It removes all resistance from a household circuit."], 0, safety[2]),
+      workUpload(`t${n}-resistance-factor`, `Show your work: what causes electrical resistance, and how does this factor change resistance: ${factor}?`, `Full credit: collisions/interaction of moving charges with atoms plus the named factor's effect on resistance.`, ["collisions", "charges", "atoms", ...factor.split(" ").slice(0, 3)], `Electrical resistance comes from moving charges interacting with atoms in the material. In general, ${factor}.`),
+      workUpload(`t${n}-challenge`, `Show your work for this circuit: three equal lamps E, F, and G are arranged with E in series with a parallel pair F and G. Predict what happens if F burns out, and rank brightness before the burnout.`, `Full credit: F opening leaves G still conducting with E in series; total resistance rises, so E and G become dimmer than before; before burnout E is brightest, F and G are equal and dimmer.`, ["parallel", "series", "E", "F", "G", "brightest", "dimmer"], "Before burnout, E is brightest because it carries the total current; F and G are equal and dimmer. If F burns out, G still works but the total circuit resistance increases, reducing current through E and G.")
     ],
   };
 }

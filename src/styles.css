@@ -485,6 +485,37 @@ textarea {
   width: 100%;
 }
 
+.work-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.work-box textarea {
+  margin-top: 0;
+}
+
+.upload-line {
+  align-items: center;
+  background: #f8faf8;
+  border: 1px dashed #9fb0a7;
+  border-radius: 8px;
+  color: #253337;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  font-weight: 700;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.upload-line input {
+  color: #526165;
+  font: inherit;
+  max-width: 100%;
+}
+
 .feedback {
   background: #f3f7f4;
   border-radius: 8px;
@@ -658,9 +689,15 @@ textarea {
 }
 
 .metric-row span,
-.missed-row span {
+.missed-row span,
+.missed-row em {
   color: #526165;
   line-height: 1.45;
+}
+
+.missed-row em {
+  font-style: normal;
+  font-weight: 700;
 }
 
 .attempt-table {
