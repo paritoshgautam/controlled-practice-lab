@@ -852,7 +852,6 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
   const [studentMessages, setStudentMessages] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [expandedAttemptId, setExpandedAttemptId] = useState("");
   const students = data.users.filter((user) => user.role === "student");
   const selectedStudent = students.find((student) => student.id === selectedStudentId) || students[0];
   const selectedInsights = selectedStudent ? getStudentInsights(selectedStudent, data.attempts) : null;
@@ -1045,7 +1044,6 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
           </div>
           <div className="attempt-table">
             <div className="attempt-row attempt-head">
-              <span>Review</span>
               <span>Student</span>
               <span>Test</span>
               <span>Score</span>
@@ -1057,21 +1055,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
               <p className="hint">No attempts recorded yet. Attempts are saved when a user submits or times out.</p>
             ) : data.attempts.map((attempt) => (
               <React.Fragment key={attempt.id}>
-                <div
-                  className={expandedAttemptId === attempt.id ? "attempt-row attempt-click expanded" : "attempt-row attempt-click"}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id);
-                    }
-                  }}
-                >
-                  <span className="review-toggle">
-                    {expandedAttemptId === attempt.id ? "Hide" : "View"}
-                  </span>
+                <div className="attempt-row">
                   <span>{attempt.userName}</span>
                   <span>{attempt.subject} - {attempt.testTitle}</span>
                   <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
@@ -1079,9 +1063,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
                   <span>{attempt.warnings}</span>
                   <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
                 </div>
-                {expandedAttemptId === attempt.id && (
-                  <AttemptReview attempt={attempt} />
-                )}
+                <AttemptReview attempt={attempt} />
               </React.Fragment>
             ))}
           </div>
