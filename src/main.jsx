@@ -92,32 +92,120 @@ const formatDuration = (seconds) => {
   return `${minutes}m ${remaining}s`;
 };
 
-const scoreOpen = (answer, keywords) => {
+const scoreWork = (answer, keywords) => {
   const normalized = String(answer || "").toLowerCase();
-  const hits = keywords.filter((word) => normalized.includes(String(word).toLowerCase()));
-  return Math.min(1, hits.length / Math.max(4, keywords.length));
+  const rubricWords = Array.isArray(keywords) ? keywords : [];
+  const matched = rubricWords.filter((word) => normalized.includes(String(word).toLowerCase()));
+  const missing = rubricWords.filter((word) => !normalized.includes(String(word).toLowerCase()));
+  return {
+    score: Math.min(1, matched.length / Math.max(4, rubricWords.length)),
+    matched,
+    missing,
+  };
 };
 
-const scoreQuestion = (question, answer) => {
+const answerOrBlank = (value) => value || "Not answered";
+
+const formatNumericAnswer = (value, unit) => {
+  if (value === undefined || value === null || value === "") return "Not answered";
+  return `${value}${unit ? ` ${unit}` : ""}`;
+};
+
+const formatChoiceAnswer = (question, value) => {
+  const index = Number(value);
+  if (!Number.isInteger(index) || !question.options?.[index]) return "Not answered";
+  return question.options[index];
+};
+
+const getCorrectAnswerLabel = (question) => {
+  if (question.type === "choice") return formatChoiceAnswer(question, question.answer);
+  if (question.type === "mc_work") return `${formatChoiceAnswer(question, question.answer)}. Expected work: ${question.sample}`;
+  if (question.type === "numeric") return formatNumericAnswer(question.answer, question.unit);
+  if (question.type === "work_upload") return question.sample || question.rubric || "Use the model response and rubric.";
+  return question.sample || question.explanation || "See explanation.";
+};
+
+const getStudentAnswerLabel = (question, answer) => {
+  if (question.type === "choice") return formatChoiceAnswer(question, answer);
+  if (question.type === "numeric") return formatNumericAnswer(answer, question.unit);
+  if (question.type === "mc_work") {
+    const selected = formatChoiceAnswer(question, answer?.choice);
+    const work = answer?.work ? ` Work shown: ${answer.work}` : " No work shown.";
+    const file = answer?.fileName ? ` Rough work: ${answer.fileName}.` : "";
+    return `${selected}.${work}${file}`;
+  }
+  if (question.type === "work_upload") {
+    const work = answer?.work ? answer.work : "No typed work.";
+    const file = answer?.fileName ? ` Rough work: ${answer.fileName}.` : "";
+    return `${work}${file}`;
+  }
+  return answerOrBlank(answer);
+};
+
+const reviewQuestion = (question, answer) => {
+  const base = {
+    studentAnswerLabel: getStudentAnswerLabel(question, answer),
+    correctAnswerLabel: getCorrectAnswerLabel(question),
+    explanation: question.explanation || "",
+    rubric: question.rubric || "",
+    sample: question.sample || "",
+    roughWorkFile: answer?.fileName || null,
+  };
+
   if (question.type === "choice") {
-    return Number(answer) === question.answer ? 1 : 0;
+    const earned = Number(answer) === question.answer ? 1 : 0;
+    return {
+      ...base,
+      earned,
+      correct: earned >= 0.99,
+      scoreReason: earned ? "Selected the correct option." : "The selected option did not match the correct answer.",
+    };
   }
   if (question.type === "mc_work") {
     const choiceScore = Number(answer?.choice) === question.answer ? 0.7 : 0;
-    const workScore = scoreOpen(answer?.work || "", question.keywords) * 0.3;
-    return choiceScore + workScore;
+    const work = scoreWork(answer?.work || "", question.keywords);
+    const workScore = work.score * 0.3;
+    const earned = choiceScore + workScore;
+    return {
+      ...base,
+      earned,
+      correct: earned >= 0.99,
+      scoreReason: `Answer choice earned ${choiceScore.toFixed(1)} of 0.7. Work earned ${workScore.toFixed(1)} of 0.3. Matched steps: ${work.matched.length ? work.matched.join(", ") : "none"}. Missing: ${work.missing.length ? work.missing.join(", ") : "no major rubric terms missing"}.`,
+    };
   }
   if (question.type === "work_upload") {
-    const workScore = scoreOpen(answer?.work || "", question.keywords);
-    if (workScore > 0) return workScore;
-    return answer?.fileName ? 0.25 : 0;
+    const work = scoreWork(answer?.work || "", question.keywords);
+    const earned = work.score > 0 ? work.score : answer?.fileName ? 0.25 : 0;
+    return {
+      ...base,
+      earned,
+      correct: earned >= 0.99,
+      scoreReason: work.score > 0
+        ? `Step analysis matched: ${work.matched.length ? work.matched.join(", ") : "none"}. Missing: ${work.missing.length ? work.missing.join(", ") : "no major rubric terms missing"}.`
+        : answer?.fileName
+          ? "Rough work was attached, but no typed steps were available for automatic step analysis."
+          : "No typed steps or rough-work attachment were submitted.",
+    };
   }
   if (question.type === "numeric") {
     const value = Number(answer);
-    if (!Number.isFinite(value)) return 0;
-    return Math.abs(value - question.answer) <= question.tolerance ? 1 : 0;
+    const earned = Number.isFinite(value) && Math.abs(value - question.answer) <= question.tolerance ? 1 : 0;
+    return {
+      ...base,
+      earned,
+      correct: earned >= 0.99,
+      scoreReason: earned
+        ? `The value is within the allowed tolerance of ${question.tolerance}${question.unit ? ` ${question.unit}` : ""}.`
+        : `The submitted value is outside the allowed tolerance of ${question.tolerance}${question.unit ? ` ${question.unit}` : ""}.`,
+    };
   }
-  return scoreOpen(answer || "", question.keywords);
+  const work = scoreWork(answer || "", question.keywords);
+  return {
+    ...base,
+    earned: work.score,
+    correct: work.score >= 0.99,
+    scoreReason: `Matched: ${work.matched.length ? work.matched.join(", ") : "none"}. Missing: ${work.missing.length ? work.missing.join(", ") : "no major rubric terms missing"}.`,
+  };
 };
 
 const pct = (value) => `${Math.round(value * 100)}%`;
@@ -150,11 +238,35 @@ const mapSupabaseAttempt = (attempt) => ({
 
 const getConcept = (question) => question.topic || question.rubric || question.type;
 
+const findAttemptQuestion = (attempt, detail) => {
+  const subject = subjects.find((item) => item.label === attempt.subject || item.id === String(attempt.subject || "").toLowerCase());
+  const test = subject?.tests.find((item) => item.id === attempt.testId || item.title === attempt.testTitle);
+  return test?.questions.find((question) => question.id === detail.questionId)
+    || test?.questions[(detail.questionNumber || 1) - 1]
+    || null;
+};
+
+const normalizeAttemptDetail = (attempt, detail) => {
+  if (detail.studentAnswerLabel || detail.correctAnswerLabel || detail.scoreReason) return detail;
+  const question = findAttemptQuestion(attempt, detail);
+  return {
+    ...detail,
+    studentAnswerLabel: "Not saved for older attempt",
+    correctAnswerLabel: question ? getCorrectAnswerLabel(question) : "Not available for older attempt",
+    explanation: detail.explanation || question?.explanation || "This older attempt was saved before detailed review data was added.",
+    rubric: detail.rubric || question?.rubric || "",
+    sample: detail.sample || question?.sample || "",
+    scoreReason: detail.correct ? "Marked correct." : "Legacy attempt: the student's selected answer was not saved, so only score and question data are available.",
+  };
+};
+
+const getAttemptDetails = (attempt) => (attempt.details || []).map((detail) => normalizeAttemptDetail(attempt, detail));
+
 const getStudentInsights = (student, attempts) => {
   const studentAttempts = attempts.filter((attempt) => attempt.userId === student.id);
   const conceptMap = new Map();
   for (const attempt of studentAttempts) {
-    for (const detail of attempt.details || []) {
+    for (const detail of getAttemptDetails(attempt)) {
       const concept = detail.concept || "Mixed concept";
       const current = conceptMap.get(concept) || { concept, missed: 0, total: 0 };
       current.total += 1;
@@ -197,8 +309,8 @@ function App() {
 
   const results = useMemo(() => {
     const rows = selectedTest.questions.map((question, index) => {
-      const earned = scoreQuestion(question, answers[question.id]);
-      return { index, question, earned };
+      const review = reviewQuestion(question, answers[question.id]);
+      return { index, question, earned: review.earned, review };
     });
     const total = rows.reduce((sum, row) => sum + row.earned, 0);
     return { rows, total, percent: total / selectedTest.questions.length };
@@ -299,8 +411,14 @@ function App() {
         type: row.question.type,
         prompt: row.question.prompt,
         earned: Number(row.earned.toFixed(2)),
-        correct: row.earned >= 0.99,
-        roughWorkFile: answers[row.question.id]?.fileName || null,
+        correct: row.review.correct,
+        studentAnswerLabel: row.review.studentAnswerLabel,
+        correctAnswerLabel: row.review.correctAnswerLabel,
+        explanation: row.review.explanation,
+        rubric: row.review.rubric,
+        sample: row.review.sample,
+        scoreReason: row.review.scoreReason,
+        roughWorkFile: row.review.roughWorkFile,
       })),
     };
     if (isSupabaseConfigured) {
@@ -329,7 +447,7 @@ function App() {
       });
     }
     setAttemptSaved(true);
-  }, [answered, attemptSaved, authUser, results.percent, results.total, selectedTest, startedAt, submitted, warnings.length]);
+  }, [answered, attemptSaved, authUser, results, selectedTest, startedAt, submitted, warnings.length]);
 
   const start = async () => {
     setAnswers({});
@@ -645,7 +763,7 @@ function App() {
                   question={question}
                   value={answers[question.id] ?? ""}
                   locked={submitted}
-                  score={submitted ? results.rows[index].earned : null}
+                  review={submitted ? results.rows[index].review : null}
                   onChange={(value) => setAnswers((current) => ({ ...current, [question.id]: value }))}
                 />
               ))}
@@ -717,6 +835,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
   const [studentMessages, setStudentMessages] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [expandedAttemptId, setExpandedAttemptId] = useState("");
   const students = data.users.filter((user) => user.role === "student");
   const selectedStudent = students.find((student) => student.id === selectedStudentId) || students[0];
   const selectedInsights = selectedStudent ? getStudentInsights(selectedStudent, data.attempts) : null;
@@ -809,18 +928,19 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
               <div className="dashboard-panel wide">
                 <h4>Missed Questions</h4>
                 {selectedInsights.attempts.flatMap((attempt) => (
-                  (attempt.details || [])
+                  getAttemptDetails(attempt)
                     .filter((detail) => !detail.correct)
                     .map((detail) => ({ ...detail, attempt }))
                 )).length === 0 ? (
                   <p className="hint">No missed question detail yet. Older attempts may not have concept-level data.</p>
                 ) : selectedInsights.attempts.flatMap((attempt) => (
-                  (attempt.details || [])
+                  getAttemptDetails(attempt)
                     .filter((detail) => !detail.correct)
                     .map((detail) => (
                       <div className="missed-row" key={`${attempt.id}-${detail.questionId}`}>
                         <strong>{attempt.testTitle} Q{detail.questionNumber}: {detail.concept}</strong>
                         <span>{detail.prompt}</span>
+                        <span>{detail.scoreReason}</span>
                         {detail.roughWorkFile && <em>Rough work: {detail.roughWorkFile}</em>}
                       </div>
                     ))
@@ -908,6 +1028,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
           </div>
           <div className="attempt-table">
             <div className="attempt-row attempt-head">
+              <span>Review</span>
               <span>Student</span>
               <span>Test</span>
               <span>Score</span>
@@ -918,14 +1039,26 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
             {data.attempts.length === 0 ? (
               <p className="hint">No attempts recorded yet. Attempts are saved when a user submits or times out.</p>
             ) : data.attempts.map((attempt) => (
-              <div className="attempt-row" key={attempt.id}>
-                <span>{attempt.userName}</span>
-                <span>{attempt.subject} - {attempt.testTitle}</span>
-                <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
-                <span>{formatDuration(attempt.elapsedSeconds)}</span>
-                <span>{attempt.warnings}</span>
-                <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
-              </div>
+              <React.Fragment key={attempt.id}>
+                <div className="attempt-row">
+                  <button
+                    className="mini-button"
+                    type="button"
+                    onClick={() => setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id)}
+                  >
+                    {expandedAttemptId === attempt.id ? "Hide" : "View"}
+                  </button>
+                  <span>{attempt.userName}</span>
+                  <span>{attempt.subject} - {attempt.testTitle}</span>
+                  <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
+                  <span>{formatDuration(attempt.elapsedSeconds)}</span>
+                  <span>{attempt.warnings}</span>
+                  <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
+                </div>
+                {expandedAttemptId === attempt.id && (
+                  <AttemptReview attempt={attempt} />
+                )}
+              </React.Fragment>
             ))}
           </div>
         </section>
@@ -934,8 +1067,43 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
   );
 }
 
-function Question({ index, question, value, locked, score, onChange }) {
-  const correct = score >= 0.99;
+function AttemptReview({ attempt }) {
+  const details = getAttemptDetails(attempt);
+  return (
+    <div className="attempt-review">
+      <div className="review-summary">
+        <strong>{attempt.subject} - {attempt.testTitle}</strong>
+        <span>{attempt.userName} submitted {details.length} question detail(s).</span>
+      </div>
+      {details.map((detail) => (
+        <div className={detail.correct ? "review-item correct" : "review-item missed"} key={`${attempt.id}-${detail.questionId || detail.questionNumber}`}>
+          <div className="review-item-head">
+            <strong>Q{detail.questionNumber}: {detail.concept || "Mixed concept"}</strong>
+            <b>{Number(detail.earned || 0).toFixed(1)} / 1</b>
+          </div>
+          <p>{detail.prompt}</p>
+          <div className="answer-grid">
+            <div>
+              <span>Your answer</span>
+              <p>{answerOrBlank(detail.studentAnswerLabel)}</p>
+            </div>
+            <div>
+              <span>Correct answer</span>
+              <p>{answerOrBlank(detail.correctAnswerLabel || detail.sample)}</p>
+            </div>
+          </div>
+          <p><b>{detail.correct ? "Score reason" : "What went wrong"}:</b> {detail.scoreReason || (detail.correct ? "Marked correct." : "No detailed score reason was saved for this older attempt.")}</p>
+          {detail.explanation && <p><b>Explanation:</b> {detail.explanation}</p>}
+          {detail.rubric && <p><b>Rubric:</b> {detail.rubric}</p>}
+          {detail.roughWorkFile && <p><b>Rough work:</b> {detail.roughWorkFile}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Question({ index, question, value, locked, review, onChange }) {
+  const correct = review?.correct;
   const typeLabel = question.type === "work_upload"
     ? "Show your work"
     : question.type === "numeric"
@@ -1026,17 +1194,22 @@ function Question({ index, question, value, locked, score, onChange }) {
 
       {locked && (
         <div className="feedback">
-          <strong>{score.toFixed(1)} / 1 point</strong>
-          {question.type === "work_upload" || question.type === "mc_work" ? (
-            <>
-              <p>{question.rubric || "Reasoning credit is based on the selected answer plus relevant steps."}</p>
-              <p><b>Model response:</b> {question.sample}</p>
-              {fileName && <p><b>Rough work uploaded:</b> {fileName}</p>}
-              {question.explanation && <p>{question.explanation}</p>}
-            </>
-          ) : (
-            <p>{question.explanation}</p>
-          )}
+          <strong>{Number(review?.earned || 0).toFixed(1)} / 1 point</strong>
+          <div className="answer-grid">
+            <div>
+              <span>Your answer</span>
+              <p>{answerOrBlank(review?.studentAnswerLabel)}</p>
+            </div>
+            <div>
+              <span>Correct answer</span>
+              <p>{answerOrBlank(review?.correctAnswerLabel || question.sample)}</p>
+            </div>
+          </div>
+          {!review?.correct && <p><b>What went wrong:</b> {review?.scoreReason}</p>}
+          {review?.correct && <p><b>Result:</b> {review?.scoreReason}</p>}
+          {review?.explanation && <p><b>Explanation:</b> {review.explanation}</p>}
+          {review?.rubric && <p><b>Rubric:</b> {review.rubric}</p>}
+          {fileName && <p><b>Rough work uploaded:</b> {fileName}</p>}
         </div>
       )}
     </article>
