@@ -292,17 +292,27 @@ const getAttemptDetails = (attempt) => {
 const getStudentInsights = (student, attempts) => {
   const studentAttempts = attempts.filter((attempt) => attempt.userId === student.id);
   const conceptMap = new Map();
+  let right = 0;
+  let wrong = 0;
   for (const attempt of studentAttempts) {
     for (const detail of getAttemptDetails(attempt)) {
       const concept = detail.concept || "Mixed concept";
       const current = conceptMap.get(concept) || { concept, missed: 0, total: 0 };
       current.total += 1;
-      if (!detail.correct) current.missed += 1;
+      if (detail.correct) {
+        right += 1;
+      } else {
+        wrong += 1;
+        current.missed += 1;
+      }
       conceptMap.set(concept, current);
     }
   }
   return {
     attempts: studentAttempts,
+    right,
+    wrong,
+    totalQuestions: right + wrong,
     concepts: [...conceptMap.values()]
       .filter((item) => item.missed > 0)
       .sort((a, b) => b.missed - a.missed || b.total - a.total),
@@ -522,6 +532,16 @@ function App() {
       setCurrentQuestionIndex((index) => index + 1);
       return;
     }
+    setSubmitted(true);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  };
+
+  const finishTestEarly = () => {
+    const notAttempted = selectedTest.questions.length - answered;
+    const message = notAttempted > 0
+      ? `You have ${notAttempted} question(s) not attempted. Finishing now may result in failure. Submit anyway?`
+      : "Finish and submit this test now?";
+    if (!window.confirm(message)) return;
     setSubmitted(true);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   };
@@ -814,11 +834,17 @@ function App() {
 
               <div className="submit-bar">
                 {!currentReviewed ? (
-                  <button className="primary" type="submit" disabled={!currentAnswered}>Check Answer</button>
+                  <>
+                    <button className="secondary" type="button" onClick={finishTestEarly}>Finish Test</button>
+                    <button className="primary" type="submit" disabled={!currentAnswered}>Check Answer</button>
+                  </>
                 ) : !submitted ? (
-                  <button className="primary" type="button" onClick={goToNextQuestion}>
-                    {currentQuestionIndex === selectedTest.questions.length - 1 ? "Finish Test" : "Next Question"}
-                  </button>
+                  <>
+                    <button className="secondary" type="button" onClick={finishTestEarly}>Finish Test</button>
+                    <button className="primary" type="button" onClick={goToNextQuestion}>
+                      {currentQuestionIndex === selectedTest.questions.length - 1 ? "Finish Test" : "Next Question"}
+                    </button>
+                  </>
                 ) : (
                   <button className="secondary" type="button" onClick={reset}><RotateCcw size={18} /> Choose Another Test</button>
                 )}
@@ -883,6 +909,7 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
   const [studentMessages, setStudentMessages] = useState({});
   const [passwordDrafts, setPasswordDrafts] = useState({});
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [reviewAttempt, setReviewAttempt] = useState(null);
   const students = data.users.filter((user) => user.role === "student");
   const selectedStudent = students.find((student) => student.id === selectedStudentId) || students[0];
   const selectedInsights = selectedStudent ? getStudentInsights(selectedStudent, data.attempts) : null;
@@ -922,44 +949,44 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
 
         {dataError && <section className="warning-log"><strong>Database warning</strong><div><span>{dataError}</span></div></section>}
 
+        {reviewAttempt && (
+          <div className="modal-backdrop" role="presentation" onClick={() => setReviewAttempt(null)}>
+            <section className="review-modal" role="dialog" aria-modal="true" aria-label="Attempt review" onClick={(event) => event.stopPropagation()}>
+              <div className="review-modal-head">
+                <div>
+                  <p className="eyebrow">Attempt Review</p>
+                  <h3>{reviewAttempt.userName} - {reviewAttempt.subject} {reviewAttempt.testTitle}</h3>
+                </div>
+                <button className="secondary" type="button" onClick={() => setReviewAttempt(null)}>Close</button>
+              </div>
+              <AttemptReview attempt={reviewAttempt} />
+            </section>
+          </div>
+        )}
+
         <section className="admin-card">
           <div className="section-heading">
             <div>
               <p className="eyebrow">Student Dashboard</p>
               <h3>Performance by Test and Concept</h3>
             </div>
-            {students.length > 0 && (
-              <select
-                className="student-select"
-                value={selectedStudent?.id || ""}
-                onChange={(event) => setSelectedStudentId(event.target.value)}
-              >
-                {students.map((student) => (
-                  <option key={student.id} value={student.id}>{student.name}</option>
-                ))}
-              </select>
-            )}
           </div>
           {!selectedStudent || !selectedInsights ? (
             <p className="hint">Create a student and submit a test to see performance insights.</p>
           ) : (
             <div className="dashboard-grid">
-              <div className="dashboard-panel">
-                <h4>Tests Attempted</h4>
-                {selectedInsights.attempts.length === 0 ? (
-                  <p className="hint">No attempts yet.</p>
-                ) : selectedInsights.attempts.map((attempt) => (
-                  <div className="metric-row" key={attempt.id}>
-                    <div>
-                      <strong>{attempt.subject} - {attempt.testTitle}</strong>
-                      <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
-                    </div>
-                    <b>{attempt.percent}%</b>
-                  </div>
-                ))}
+              <div className="dashboard-panel stat-card">
+                <h4>Total Attempts</h4>
+                <strong>{selectedInsights.attempts.length}</strong>
+                <span>{selectedStudent.name}</span>
+              </div>
+              <div className="dashboard-panel stat-card">
+                <h4>Right vs Wrong</h4>
+                <strong>{selectedInsights.right}/{selectedInsights.totalQuestions || 0}</strong>
+                <span>{selectedInsights.wrong} wrong or incomplete</span>
               </div>
               <div className="dashboard-panel">
-                <h4>Concepts to Review</h4>
+                <h4>Key Topics to Strengthen</h4>
                 {selectedInsights.concepts.length === 0 ? (
                   <p className="hint">No missed concepts recorded for this student.</p>
                 ) : selectedInsights.concepts.slice(0, 8).map((concept) => (
@@ -973,24 +1000,17 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
                 ))}
               </div>
               <div className="dashboard-panel wide">
-                <h4>Missed Questions</h4>
-                {selectedInsights.attempts.flatMap((attempt) => (
-                  getAttemptDetails(attempt)
-                    .filter((detail) => !detail.correct)
-                    .map((detail) => ({ ...detail, attempt }))
-                )).length === 0 ? (
-                  <p className="hint">No missed question detail yet. Older attempts may not have concept-level data.</p>
-                ) : selectedInsights.attempts.flatMap((attempt) => (
-                  getAttemptDetails(attempt)
-                    .filter((detail) => !detail.correct)
-                    .map((detail) => (
-                      <div className="missed-row" key={`${attempt.id}-${detail.questionId}`}>
-                        <strong>{attempt.testTitle} Q{detail.questionNumber}: {detail.concept}</strong>
-                        <span>{detail.prompt}</span>
-                        <span>{detail.scoreReason}</span>
-                        {detail.roughWorkFile && <em>Rough work: {detail.roughWorkFile}</em>}
-                      </div>
-                    ))
+                <h4>Attempts</h4>
+                {selectedInsights.attempts.length === 0 ? (
+                  <p className="hint">No attempts yet.</p>
+                ) : selectedInsights.attempts.map((attempt) => (
+                  <div className="metric-row attempt-summary" key={attempt.id}>
+                    <div>
+                      <strong>{attempt.subject} - {attempt.testTitle}</strong>
+                      <span>{attempt.score}/{attempt.total} ({attempt.percent}%) - {new Date(attempt.submittedAt).toLocaleString()}</span>
+                    </div>
+                    <button className="secondary" type="button" onClick={() => setReviewAttempt(attempt)}>View</button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1031,12 +1051,12 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
               ) : students.map((student) => {
                 const attempts = data.attempts.filter((attempt) => attempt.userId === student.id);
                 return (
-                  <div key={student.id} className="student-row">
-                    <div>
+                  <div key={student.id} className={selectedStudent?.id === student.id ? "student-row selected" : "student-row"}>
+                    <button className="student-pick" type="button" onClick={() => setSelectedStudentId(student.id)}>
                       <strong>{student.name}</strong>
                       <span>@{student.username}</span>
                       {studentMessages[student.id] && <small>{studentMessages[student.id]}</small>}
-                    </div>
+                    </button>
                     <b>{attempts.length} attempts</b>
                     <form className="student-actions" onSubmit={async (event) => {
                       event.preventDefault();
@@ -1085,17 +1105,14 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
             {data.attempts.length === 0 ? (
               <p className="hint">No attempts recorded yet. Attempts are saved when a user submits or times out.</p>
             ) : data.attempts.map((attempt) => (
-              <React.Fragment key={attempt.id}>
-                <div className="attempt-row">
-                  <span>{attempt.userName}</span>
-                  <span>{attempt.subject} - {attempt.testTitle}</span>
-                  <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
-                  <span>{formatDuration(attempt.elapsedSeconds)}</span>
-                  <span>{attempt.warnings}</span>
-                  <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
-                </div>
-                <AttemptReview attempt={attempt} />
-              </React.Fragment>
+              <div className="attempt-row" key={attempt.id}>
+                <span>{attempt.userName}</span>
+                <span>{attempt.subject} - {attempt.testTitle}</span>
+                <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
+                <span>{formatDuration(attempt.elapsedSeconds)}</span>
+                <span>{attempt.warnings}</span>
+                <span>{new Date(attempt.submittedAt).toLocaleString()}</span>
+              </div>
             ))}
           </div>
         </section>
