@@ -260,7 +260,24 @@ const normalizeAttemptDetail = (attempt, detail) => {
   };
 };
 
-const getAttemptDetails = (attempt) => (attempt.details || []).map((detail) => normalizeAttemptDetail(attempt, detail));
+const getAttemptDetails = (attempt) => {
+  const details = attempt.details || [];
+  if (details.length > 0) return details.map((detail) => normalizeAttemptDetail(attempt, detail));
+
+  const subject = subjects.find((item) => item.label === attempt.subject || item.id === String(attempt.subject || "").toLowerCase());
+  const test = subject?.tests.find((item) => item.id === attempt.testId || item.title === attempt.testTitle);
+  if (!test) return [];
+
+  return test.questions.map((question, index) => normalizeAttemptDetail(attempt, {
+    questionNumber: index + 1,
+    questionId: question.id,
+    concept: getConcept(question),
+    type: question.type,
+    prompt: question.prompt,
+    earned: 0,
+    correct: false,
+  }));
+};
 
 const getStudentInsights = (student, attempts) => {
   const studentAttempts = attempts.filter((attempt) => attempt.userId === student.id);
@@ -1040,14 +1057,21 @@ function AdminConsole({ data, dataError, dataMode, onCreateUser, onDeleteStudent
               <p className="hint">No attempts recorded yet. Attempts are saved when a user submits or times out.</p>
             ) : data.attempts.map((attempt) => (
               <React.Fragment key={attempt.id}>
-                <div className="attempt-row">
-                  <button
-                    className="mini-button"
-                    type="button"
-                    onClick={() => setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id)}
-                  >
+                <div
+                  className={expandedAttemptId === attempt.id ? "attempt-row attempt-click expanded" : "attempt-row attempt-click"}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setExpandedAttemptId((current) => current === attempt.id ? "" : attempt.id);
+                    }
+                  }}
+                >
+                  <span className="review-toggle">
                     {expandedAttemptId === attempt.id ? "Hide" : "View"}
-                  </button>
+                  </span>
                   <span>{attempt.userName}</span>
                   <span>{attempt.subject} - {attempt.testTitle}</span>
                   <span>{attempt.score}/{attempt.total} ({attempt.percent}%)</span>
