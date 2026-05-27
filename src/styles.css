@@ -382,6 +382,21 @@ h1 {
   gap: 14px;
 }
 
+.question-progress {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dfe4df;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.question-progress span {
+  color: #526165;
+}
+
 .question {
   background: #ffffff;
   border: 1px solid #dfe4df;

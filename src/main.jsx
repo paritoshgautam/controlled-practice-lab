@@ -106,6 +106,16 @@ const scoreWork = (answer, keywords) => {
 
 const answerOrBlank = (value) => value || "Not answered";
 
+const isQuestionAnswered = (question, answer) => {
+  if (question.type === "mc_work") {
+    return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
+  }
+  if (question.type === "work_upload") {
+    return String(answer?.work || "").trim() !== "" || Boolean(answer?.fileName);
+  }
+  return answer !== undefined && String(answer).trim() !== "";
+};
+
 const formatNumericAnswer = (value, unit) => {
   if (value === undefined || value === null || value === "") return "Not answered";
   return `${value}${unit ? ` ${unit}` : ""}`;
@@ -318,6 +328,8 @@ function App() {
   const [submitted, setSubmitted] = useState(false);
   const [attemptSaved, setAttemptSaved] = useState(false);
   const [answers, setAnswers] = useState({});
+  const [reviewedQuestions, setReviewedQuestions] = useState({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [warnings, setWarnings] = useState([]);
   const [startedAt, setStartedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -333,16 +345,13 @@ function App() {
     return { rows, total, percent: total / selectedTest.questions.length };
   }, [answers, selectedTest]);
 
-  const answered = selectedTest.questions.filter((question) => {
-    const answer = answers[question.id];
-    if (question.type === "mc_work") {
-      return answer?.choice !== undefined && String(answer?.work || "").trim() !== "";
-    }
-    if (question.type === "work_upload") {
-      return String(answer?.work || "").trim() !== "" || Boolean(answer?.fileName);
-    }
-    return answer !== undefined && String(answer).trim() !== "";
-  }).length;
+  const answered = selectedTest.questions.filter((question) => isQuestionAnswered(question, answers[question.id])).length;
+  const reviewedCount = selectedTest.questions.filter((question) => reviewedQuestions[question.id]).length;
+  const currentQuestion = selectedTest.questions[currentQuestionIndex] || selectedTest.questions[0];
+  const currentRow = results.rows[currentQuestionIndex] || results.rows[0];
+  const currentAnswer = answers[currentQuestion.id];
+  const currentAnswered = isQuestionAnswered(currentQuestion, currentAnswer);
+  const currentReviewed = Boolean(reviewedQuestions[currentQuestion.id]) || submitted;
 
   useEffect(() => {
     if (!started || submitted) return;
@@ -468,6 +477,8 @@ function App() {
 
   const start = async () => {
     setAnswers({});
+    setReviewedQuestions({});
+    setCurrentQuestionIndex(0);
     setWarnings([]);
     setSubmitted(false);
     setAttemptSaved(false);
@@ -495,8 +506,23 @@ function App() {
     setSubmitted(false);
     setAttemptSaved(false);
     setAnswers({});
+    setReviewedQuestions({});
+    setCurrentQuestionIndex(0);
     setWarnings([]);
     setStartedAt(null);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  };
+
+  const checkCurrentAnswer = () => {
+    setReviewedQuestions((current) => ({ ...current, [currentQuestion.id]: true }));
+  };
+
+  const goToNextQuestion = () => {
+    if (currentQuestionIndex < selectedTest.questions.length - 1) {
+      setCurrentQuestionIndex((index) => index + 1);
+      return;
+    }
+    setSubmitted(true);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   };
 
@@ -733,7 +759,7 @@ function App() {
           <div className="status-strip">
             <span><Clock size={16} /> {started ? `${elapsedMinutes} min` : "Not started"}</span>
             <span><Clock size={16} /> {started ? `${remainingLabel} left` : `${selectedTest.timeLimitMinutes} min limit`}</span>
-            <span><Calculator size={16} /> {answered}/{selectedTest.questions.length} answered</span>
+            <span><Calculator size={16} /> {reviewedCount}/{selectedTest.questions.length} checked</span>
             <span className={warnings.length ? "warning-pill" : ""}><AlertTriangle size={16} /> {warnings.length} warnings</span>
           </div>
         </header>
@@ -742,10 +768,10 @@ function App() {
           <section className="start-panel">
             <div>
               <Lock size={34} />
-              <h3>Answers stay hidden until submit.</h3>
+              <h3>One question at a time.</h3>
               <p>
                 {selectedTest.description} This test has {selectedTest.questions.length} questions and a {selectedTest.timeLimitMinutes}-minute target.
-                Answers and explanations appear only after submission.
+                After each answer is checked, you will see whether it is right or wrong with the correct answer and steps.
               </p>
             </div>
             <div className="rules">
@@ -770,24 +796,29 @@ function App() {
 
             <form className="questions" onSubmit={(event) => {
               event.preventDefault();
-              setSubmitted(true);
-              if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+              if (!currentReviewed && currentAnswered) checkCurrentAnswer();
             }}>
-              {selectedTest.questions.map((question, index) => (
-                <Question
-                  key={question.id}
-                  index={index}
-                  question={question}
-                  value={answers[question.id] ?? ""}
-                  locked={submitted}
-                  review={submitted ? results.rows[index].review : null}
-                  onChange={(value) => setAnswers((current) => ({ ...current, [question.id]: value }))}
-                />
-              ))}
+              <div className="question-progress">
+                <strong>Question {currentQuestionIndex + 1} of {selectedTest.questions.length}</strong>
+                <span>{reviewedCount} checked, {answered} answered</span>
+              </div>
+              <Question
+                key={currentQuestion.id}
+                index={currentQuestionIndex}
+                question={currentQuestion}
+                value={answers[currentQuestion.id] ?? ""}
+                locked={currentReviewed}
+                review={currentReviewed ? currentRow.review : null}
+                onChange={(value) => setAnswers((current) => ({ ...current, [currentQuestion.id]: value }))}
+              />
 
               <div className="submit-bar">
-                {!submitted ? (
-                  <button className="primary" type="submit" disabled={answered < selectedTest.questions.length}>Submit Test</button>
+                {!currentReviewed ? (
+                  <button className="primary" type="submit" disabled={!currentAnswered}>Check Answer</button>
+                ) : !submitted ? (
+                  <button className="primary" type="button" onClick={goToNextQuestion}>
+                    {currentQuestionIndex === selectedTest.questions.length - 1 ? "Finish Test" : "Next Question"}
+                  </button>
                 ) : (
                   <button className="secondary" type="button" onClick={reset}><RotateCcw size={18} /> Choose Another Test</button>
                 )}
@@ -799,7 +830,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Assessment</p>
                   <h3>{pct(results.percent)} score</h3>
-                  <p>{results.total.toFixed(1)} of {selectedTest.questions.length} points. Review the explanations below and redo any calculation on paper.</p>
+	                  <p>{results.total.toFixed(1)} of {selectedTest.questions.length} points. Your answers and explanations were recorded for admin review.</p>
                 </div>
                 <div className="meter">
                   <div style={{ width: pct(results.percent) }} />
